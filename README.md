@@ -156,6 +156,7 @@ The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` m
   - 10 visitor tokens a minute;
   - 300 events per sender a minute.
 - **CORS:** the SDK's endpoints (`/auth/visitor`, `/analytics/events`) accept requests from any origin, so it works on your domain without setup.
+- **Allowed websites:** once you list your sites in the Basketline dashboard (**Integrate your site → Allowed websites**, e.g. `https://shop.example`), pages on any other website can't send your store's events: requests get `403 ORIGIN_NOT_ALLOWED`, reported to `onError`. Add every address your shop runs on, including staging and `http://localhost:<port>` while developing. Your backend's calls and mobile apps send no browser origin and aren't affected.
 
 ## Develop and publish
 
