@@ -1,4 +1,4 @@
-import { buildEvent, type ApiEvent, type EventFields, type EventName } from './events'
+import { buildEvent, type ApiEvent, type EventFields, type EventName, type FieldsFor } from './events'
 import { tokenExpiry, visitorIdFor, type KeyValueStorage } from './identity'
 
 export interface BasketlineOptions {
@@ -204,16 +204,14 @@ export function createBasketline(options: BasketlineOptions) {
   }
 
   return {
-    /** Any event (see EVENT_NAMES). Returns its eventId, or null if it was invalid (see onError). */
-    track: (eventName: EventName, fields: EventFields = {}) => enqueue(eventName, fields),
-    /** An ad of the campaign was seen. */
-    impression: ({ campaignId, ...fields }: EventFields & { campaignId: string }) => enqueue('impression', { campaignId, ...fields }),
-    /** An ad was clicked, opening a product: an add to cart of that product in the next 7 days is credited to it. */
-    click: ({ campaignId, productId, ...fields }: EventFields & { campaignId: string; productId?: string }) =>
-      enqueue('click', { campaignId, productId, ...fields }),
-    /** A product was added to the cart; Basketline credits it to the shopper's latest ad click on it. */
-    addToCart: ({ productId, quantity, ...fields }: EventFields & { productId: string; quantity?: number }) =>
-      enqueue('add_to_cart', { productId, ...fields, properties: { ...(quantity === undefined ? {} : { quantity }), ...fields.properties } }),
+    /**
+     * Sends any event (see EVENT_NAMES), e.g. sendEvent('click', { campaignId, productId }).
+     * impression and click need a campaignId, add_to_cart a productId: an add to
+     * cart is credited to the shopper's latest ad click on that product within 7 days.
+     * Returns the event's ID, or null if it was invalid (see onError).
+     */
+    sendEvent: <E extends EventName>(eventName: E, ...[fields]: {} extends FieldsFor<E> ? [fields?: FieldsFor<E>] : [fields: FieldsFor<E>]) =>
+      enqueue(eventName, fields ?? {}),
 
     /** The shopper signed in: later events are theirs. Earlier queued events still go out as the visitor. */
     identify(shopper: Identify) {

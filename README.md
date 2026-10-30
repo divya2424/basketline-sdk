@@ -5,7 +5,7 @@ Send ad and shopper events from your website to [Basketline](https://github.com/
 - **Small:** about 6 KB minified, no dependencies.
 - **Safe for your page:** it never throws into it. Problems go to `onError`.
 - **Batched:** 20 events per request or every 2 s, and sent when the page is hidden, so nothing is lost on navigation.
-- **Attribution included:** you send what happened (`click`, `addToCart`), and Basketline credits each add to cart to the shopper's latest ad click on that product within 7 days.
+- **Attribution included:** you send what happened (`click`, `add_to_cart`), and Basketline credits each add to cart to the shopper's latest ad click on that product within 7 days.
 
 ## Install
 
@@ -44,17 +44,19 @@ const bl = createBasketline({
   tenantId: 'YOUR-TENANT-ID',                   // your store's ID, from Basketline
 })
 
+// One method for every event: what happened, then its fields.
+
 // An ad was shown.
-bl.impression({ campaignId })
+bl.sendEvent('impression', { campaignId })
 
 // The shopper clicked the ad, opening a product.
-bl.click({ campaignId, productId })
+bl.sendEvent('click', { campaignId, productId })
 
 // The shopper added a product to the cart (anywhere on your site, any time in the next 7 days).
-bl.addToCart({ productId, quantity: 1 })
+bl.sendEvent('add_to_cart', { productId, quantity: 1 })
 
 // Anything else you want to analyse later.
-bl.track('cart_view', { pageName: 'cart' })
+bl.sendEvent('cart_view', { pageName: 'cart' })
 ```
 
 That's all a visitor needs. The SDK:
@@ -62,14 +64,18 @@ That's all a visitor needs. The SDK:
 2. gets a visitor token for it from Basketline;
 3. sends the events with that token.
 
-| Method | Sends | Required |
-|---|---|---|
-| `impression({ campaignId, … })` | `impression` | `campaignId` |
-| `click({ campaignId, productId, … })` | `click` | `campaignId`; `productId` for click-to-basket |
-| `addToCart({ productId, quantity?, … })` | `add_to_cart` | `productId` |
-| `track(eventName, { campaignId?, productId?, pageName?, featureName?, properties? })` | any event in `EVENT_NAMES` | `campaignId` for `impression` and `click` |
+`bl.sendEvent(eventName, fields)`:
 
-IDs are UUIDs. Every method returns the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
+| `eventName` | Required fields | Counts toward |
+|---|---|---|
+| `'impression'` | `campaignId` | impressions |
+| `'click'` | `campaignId`; `productId` for click-to-basket | clicks, and the click an add to cart is credited to |
+| `'add_to_cart'` | `productId`; `quantity` optional | click-to-basket |
+| any other name in `EVENT_NAMES` (`home_view`, `cart_view`, `product_click`, …) | none | stored for later analysis |
+
+Every event also takes `pageName`, `featureName` and `properties`. In TypeScript, a missing required field is a compile error.
+
+IDs are UUIDs. `sendEvent` returns the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
 
 ## Signed-in shoppers
 

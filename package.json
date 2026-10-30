@@ -1,6 +1,6 @@
 {
   "name": "@divya2424/basketline-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Send ad and shopper events to Basketline from any website: impressions, clicks and add-to-cart, with click-to-basket attributed server-side.",
   "license": "UNLICENSED",
   "repository": { "type": "git", "url": "git+https://github.com/divya2424/basketline-sdk.git" },

@@ -18,7 +18,7 @@ describe('batching', () => {
   it('posts 20 events per request, the rest after 2 seconds, with keepalive', async () => {
     vi.useFakeTimers()
     const { bl, api } = client()
-    for (let i = 0; i < 25; i++) bl.impression({ campaignId: CAMPAIGN })
+    for (let i = 0; i < 25; i++) bl.sendEvent('impression', { campaignId: CAMPAIGN })
     await vi.advanceTimersByTimeAsync(0)
     expect(api.eventCalls().map((c) => c.body.events.length)).toEqual([20])
     await vi.advanceTimersByTimeAsync(2000)
@@ -28,7 +28,7 @@ describe('batching', () => {
 
   it('sends what is queued when the page is hidden', async () => {
     const { bl, api } = client()
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
     document.dispatchEvent(new Event('visibilitychange'))
     await bl.flush()
@@ -41,9 +41,9 @@ describe('identity', () => {
   it("sends a visitor's events with a visitor token for its lasting UUID, reused until shortly before it expires", async () => {
     vi.useFakeTimers()
     const { bl, api } = client()
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     await bl.flush()
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     await bl.flush()
     const [first, second] = api.eventCalls()
     expect(first!.body).toMatchObject({ tenantId: TENANT, userId: bl.visitorId, userType: 'visitor' })
@@ -55,7 +55,7 @@ describe('identity', () => {
     expect(visitorCall.headers.get('tenant_id')).toBe(TENANT)
     // 26 minutes on, within 5 minutes of the token's 30: a new one.
     vi.setSystemTime(Date.now() + 26 * 60_000)
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     await bl.flush()
     expect(api.eventCalls()[2]!.headers.get('Authorization')).toMatch(/visitor-2$/)
   })
@@ -73,19 +73,19 @@ describe('identity', () => {
   it('sends a signed-in shopper\'s events with their token and ID, and the visitor\'s again after reset', async () => {
     const { bl, api } = client()
     const getToken = vi.fn(async () => tokenWithExp('shopper', Math.floor(Date.now() / 1000) + 1800))
-    bl.track('home_view') // queued as the visitor
+    bl.sendEvent('home_view') // queued as the visitor
     bl.identify({ userId: 'ABCDEF00-0000-4000-8000-000000000001', getToken })
-    bl.addToCart({ productId: PRODUCT, quantity: 2 })
-    bl.addToCart({ productId: PRODUCT })
+    bl.sendEvent('add_to_cart', { productId: PRODUCT, quantity: 2 })
+    bl.sendEvent('add_to_cart', { productId: PRODUCT })
     await bl.flush()
     bl.reset()
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     await bl.flush()
     const [asVisitor, asShopper, afterReset] = api.eventCalls()
     expect(asVisitor!.body.userType).toBe('visitor')
     expect(asShopper!.body).toMatchObject({ userId: 'abcdef00-0000-4000-8000-000000000001', userType: 'registered' })
     expect(asShopper!.headers.get('Authorization')).toMatch(/shopper$/)
-    expect(asShopper!.body.events[0]).toMatchObject({ eventName: 'add_to_cart', productId: PRODUCT, campaignId: null, properties: { quantity: 2 } })
+    expect(asShopper!.body.events[0]).toEqual(expect.objectContaining({ eventName: 'add_to_cart', properties: { productId: PRODUCT, campaignId: null, quantity: 2 } }))
     expect(getToken).toHaveBeenCalledTimes(1)
     expect(afterReset!.body).toMatchObject({ userId: bl.visitorId, userType: 'visitor' })
   })
@@ -95,7 +95,7 @@ describe('identity', () => {
     const { bl, api } = client(fakeApi(() => statuses.shift() ?? 200))
     let n = 0
     bl.identify({ userId: '00000000-0000-4000-8000-000000000001', getToken: () => `token-${++n}` })
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     await bl.flush()
     expect(api.eventCalls().map((c) => c.headers.get('Authorization'))).toEqual(['Bearer token-1', 'Bearer token-2'])
   })
@@ -109,13 +109,13 @@ describe('delivery', () => {
       const status = statuses.shift() ?? 200
       return status === 429 ? new Response('{}', { status, headers: { 'Retry-After': '3' } }) : status
     }))
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     const first = bl.flush()
     await vi.advanceTimersByTimeAsync(1000)
     await first
     expect(api.eventCalls()).toHaveLength(2)
     expect(errors).toEqual([])
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     const second = bl.flush()
     await vi.advanceTimersByTimeAsync(2999)
     expect(api.eventCalls()).toHaveLength(3)
@@ -133,12 +133,12 @@ describe('delivery', () => {
       throw new Error('bad handler')
     } })
     vi.useFakeTimers()
-    expect(() => bl.track('home_view')).not.toThrow()
+    expect(() => bl.sendEvent('home_view')).not.toThrow()
     const done = bl.flush()
     await vi.advanceTimersByTimeAsync(2000)
     await expect(done).resolves.toBeUndefined()
     bl.identify({ userId: '00000000-0000-4000-8000-000000000001', getToken: () => Promise.reject(new Error('no token')) })
-    bl.track('home_view')
+    bl.sendEvent('home_view')
     const shopperDone = bl.flush()
     await vi.advanceTimersByTimeAsync(2000)
     await expect(shopperDone).resolves.toBeUndefined()
@@ -148,16 +148,37 @@ describe('delivery', () => {
 describe('validation', () => {
   it('drops invalid events and personal-looking properties, and reports why', async () => {
     const { bl, api, errors } = client()
-    expect(bl.impression({ campaignId: 'not-a-uuid' })).toBeNull()
-    expect(bl.track('purchase' as never)).toBeNull()
-    expect(bl.click({ campaignId: CAMPAIGN, productId: 'nope' })).toBeNull()
-    const id = bl.click({ campaignId: CAMPAIGN, productId: PRODUCT, properties: { position: 1, email: 'a@b.c' } })
+    expect(bl.sendEvent('impression', { campaignId: 'not-a-uuid' })).toBeNull()
+    expect(bl.sendEvent('purchase' as never, {} as never)).toBeNull()
+    expect(bl.sendEvent('click', { campaignId: CAMPAIGN, productId: 'nope' })).toBeNull()
+    const id = bl.sendEvent('click', { campaignId: CAMPAIGN, productId: PRODUCT, properties: { position: 1, email: 'a@b.c' } })
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
     await bl.flush()
     expect(api.eventCalls()[0]!.body.events).toEqual([
-      expect.objectContaining({ eventId: id, eventName: 'click', campaignId: CAMPAIGN, productId: PRODUCT, properties: { position: 1 } }),
+      { eventId: id, eventName: 'click', timestamp: expect.any(String), properties: { campaignId: CAMPAIGN, productId: PRODUCT, position: 1 } },
     ])
     expect(errors).toHaveLength(4)
     expect(errors.at(-1)).toBe('properties dropped (personal data): email')
+  })
+
+  it("checks each event's required fields, at compile time and when it runs", () => {
+    const { bl, errors } = client()
+    // @ts-expect-error impression and click need a campaignId
+    expect(bl.sendEvent('click', { productId: PRODUCT })).toBeNull()
+    // @ts-expect-error add_to_cart needs a productId
+    expect(bl.sendEvent('add_to_cart')).toBeNull()
+    expect(bl.sendEvent('add_to_cart', { productId: PRODUCT, quantity: 0 })).toBeNull()
+    expect(errors).toEqual([
+      'event dropped: click needs a campaignId (UUID)',
+      'event dropped: add_to_cart needs a productId (UUID)',
+      'event dropped: quantity must be a positive integer',
+    ])
+  })
+
+  it('sends campaignId and productId inside properties, where the caller\'s own properties cannot override them', async () => {
+    const { bl, api } = client()
+    bl.sendEvent('click', { campaignId: CAMPAIGN, properties: { campaignId: 'spoofed', productId: 'spoofed', position: 2 } })
+    await bl.flush()
+    expect(api.eventCalls()[0]!.body.events[0]!.properties).toEqual({ campaignId: CAMPAIGN, productId: null, position: 2 })
   })
 })
