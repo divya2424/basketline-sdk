@@ -161,10 +161,10 @@ The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` m
 ## Develop and publish
 
 ```bash
-npm install
-npm test             # Vitest + jsdom
-npm run typecheck
-npm run build        # dist/: ESM, CommonJS, basketline.global.js (window.Basketline), .d.ts
+pnpm install
+pnpm test             # Vitest + jsdom
+pnpm typecheck
+pnpm build        # dist/: ESM, CommonJS, basketline.global.js (window.Basketline), .d.ts
 npm pack             # divya2424-basketline-sdk-0.1.0.tgz, to try in another project
 ```
 
