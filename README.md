@@ -32,7 +32,7 @@ Or with a script tag, without a bundler: host `dist/basketline.global.js` from t
 ```html
 <script src="/js/basketline.global.js"></script>
 <script>
-  const bl = Basketline.createBasketline({ apiUrl: 'https://api.basketline.io/api/v1', tenantId: 'YOUR-TENANT-ID' })
+  const bl = Basketline.createBasketline({ apiUrl: 'https://api.example.com/api/v1', tenantId: 'YOUR-TENANT-ID' })
 </script>
 ```
 
@@ -40,7 +40,7 @@ Or with a script tag, without a bundler: host `dist/basketline.global.js` from t
 
 ```js
 const bl = createBasketline({
-  apiUrl: 'https://api.basketline.io/api/v1',   // locally: http://localhost:8080/api/v1
+  apiUrl: 'https://api.example.com/api/v1',     // your Basketline API: the dashboard's setup code shows it
   tenantId: 'YOUR-TENANT-ID',                   // your store's ID, from Basketline
 })
 
@@ -95,7 +95,7 @@ When a shopper signs in to your site, tell the SDK who they are. Their activity 
 
 ```ts
 // See examples/backend-token.ts for an Express handler.
-const res = await fetch('https://api.basketline.io/api/v1/auth/shopper-token', {
+const res = await fetch('https://api.example.com/api/v1/auth/shopper-token', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', tenant_id: TENANT_ID, Authorization: `ApiKey ${process.env.BASKETLINE_API_KEY}` },
   body: JSON.stringify({ customerId: currentUser.id, visitorId: req.body.visitorId }),
@@ -131,7 +131,7 @@ The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` m
 
 | Option | Default | |
 |---|---|---|
-| `apiUrl` | — | The Basketline API, e.g. `https://api.basketline.io/api/v1` |
+| `apiUrl` | — | The Basketline API, as shown in the dashboard's setup code (**Integrate your site**); locally `http://localhost:8080/api/v1` |
 | `tenantId` | — | Your store's tenant ID |
 | `clientType` | `'web'` | `'web'` or `'mobile'`; the dashboard splits every metric by it |
 | `batchSize` | `20` | Events per request (at most 100) |

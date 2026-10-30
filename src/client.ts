@@ -2,7 +2,7 @@ import { buildEvent, type ApiEvent, type EventFields, type EventName, type Field
 import { tokenExpiry, visitorIdFor, type KeyValueStorage } from './identity'
 
 export interface BasketlineOptions {
-  /** The Basketline API, e.g. "https://api.basketline.io/api/v1". */
+  /** The Basketline API, e.g. "https://api.example.com/api/v1" (the dashboard's setup code shows yours). */
   apiUrl: string
   /** Your store's tenant ID (UUID), from Basketline. */
   tenantId: string

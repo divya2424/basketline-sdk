@@ -2,7 +2,7 @@
  * Example: the endpoint on a vendor's backend that hands the Basketline SDK a
  * shopper token for the signed-in customer. The API key stays on the server.
  *
- *   BASKETLINE_API_URL=https://api.basketline.io/api/v1
+ *   BASKETLINE_API_URL=https://api.example.com/api/v1   (yours: the dashboard's setup code shows it)
  *   BASKETLINE_TENANT_ID=<your tenant ID>
  *   BASKETLINE_API_KEY=bl_sk_…            (from create-api-key)
  *
