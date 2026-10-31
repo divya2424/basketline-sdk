@@ -6,6 +6,8 @@ Send ad and shopper events from your website to [Basketline](https://github.com/
 - **Safe for your page:** it never throws into it. Problems go to `onError`.
 - **Batched:** 20 events per request or every 2 s, and sent when the page is hidden, so nothing is lost on navigation.
 - **Attribution included:** you send what happened (`click`, `add_to_cart`), and Basketline credits each add to cart to the shopper's latest ad click on that product within 7 days.
+- **Your IDs:** send your own product and campaign IDs (SKUs, codes) or UUIDs.
+- **A server side too:** `@divya2424/basketline-sdk/server` sends your sellers, products and campaigns from your backend (see [Your catalog and campaigns](#your-catalog-and-campaigns-server)).
 
 ## Install
 
@@ -44,19 +46,22 @@ const bl = createBasketline({
   tenantId: 'YOUR-TENANT-ID',                   // your store's ID, from Basketline
 })
 
-// One method for every event: what happened, then its fields.
+// track(): what the shopper did with your ads and store.
 
 // An ad was shown.
-bl.sendEvent('impression', { campaignId })
+bl.track('impression', { campaignId })
 
 // The shopper clicked the ad, opening a product.
-bl.sendEvent('click', { campaignId, productId })
+bl.track('click', { campaignId, productId })
 
 // The shopper added a product to the cart (anywhere on your site, any time in the next 7 days).
-bl.sendEvent('add_to_cart', { productId, quantity: 1 })
+bl.track('add_to_cart', { productId, quantity: 1 })
 
 // Anything else you want to analyse later.
-bl.sendEvent('cart_view', { pageName: 'cart' })
+bl.track('cart_view', { pageName: 'cart' })
+
+// identity(): sign-in activity.
+bl.identity('login_click', { pageName: 'header' })
 ```
 
 That's all a visitor needs. The SDK:
@@ -64,18 +69,22 @@ That's all a visitor needs. The SDK:
 2. gets a visitor token for it from Basketline;
 3. sends the events with that token.
 
-`bl.sendEvent(eventName, fields)`:
+`bl.track(eventName, fields)` takes the interactions (`INTERACTION_EVENTS`):
 
 | `eventName` | Required fields | Counts toward |
 |---|---|---|
 | `'impression'` | `campaignId` | impressions |
 | `'click'` | `campaignId`; `productId` for click-to-basket | clicks, and the click an add to cart is credited to |
 | `'add_to_cart'` | `productId`; `quantity` optional | click-to-basket |
-| any other name in `EVENT_NAMES` (`home_view`, `cart_view`, `product_click`, …) | none | stored for later analysis |
+| `home_view`, `campaign_navigation`, `product_impression`, `product_click`, `cart_view`, `cart_quantity_update`, `remove_from_cart` | none | stored for later analysis |
 
-Every event also takes `pageName`, `featureName` and `properties`. In TypeScript, a missing required field is a compile error.
+`bl.identity(eventName, fields?)` takes sign-in activity (`IDENTITY_EVENTS`): `login_click`, `signup_click`, `login` and `logout`. You rarely send the last two yourself: `identify()` and `reset()` do (see below).
 
-IDs are UUIDs. `sendEvent` returns the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
+Every event also takes `pageName`, `featureName` and `properties`. In TypeScript, a missing required field, or an event sent through the wrong method, is a compile error.
+
+**IDs** are your own (a SKU like `SKU-123/blue`, a campaign code like `diwali-2026`: letters, digits and `._:/-`, up to 128 characters) or UUIDs. Use the same IDs as in your catalog (see the server side), so Basketline knows each product's seller. `track` and `identity` return the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
+
+`bl.sendEvent(eventName, fields)` from 0.2 still works for every event; it is deprecated in favour of `track` and `identity`.
 
 ## Signed-in shoppers
 
@@ -117,6 +126,8 @@ bl.identify({
 bl.reset()
 ```
 
+`identify()` sends a `login` event, and `reset()` a `logout` event (as the shopper, before switching back to the visitor). The SDK remembers who signed in on this browser, so calling `identify()` on every page load sends `login` only once per sign-in.
+
 **Why `visitorId`:** the first time a customer gets a token, Basketline gives them the browser's visitor ID. Their visits from before they signed in then count as the same person. Later calls return the same `userId`, whatever `visitorId` comes with them.
 
 **API keys:** every store gets its first key when it's onboarded, shown once on the onboarding page. Campaign managers create and revoke keys in the dashboard, under **Integrate your site**. Or locally, with the CLI:
@@ -126,6 +137,38 @@ docker compose exec auth-service node services/auth-service/src/cli.ts create-ap
 ```
 
 The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` manage them. A shopper token can only send events; no other Basketline API accepts it.
+
+## Your catalog and campaigns (server)
+
+Basketline reports per campaign and per seller, so it needs to know your sellers, which seller each product belongs to, and each campaign's seller and products. Only your servers know that, so they send it, with your API key. Never import this entry into a page.
+
+```ts
+import { createBasketlineServer } from '@divya2424/basketline-sdk/server'
+
+const basketline = createBasketlineServer({
+  apiUrl: 'https://api.example.com/api/v1',
+  tenantId: 'YOUR-TENANT-ID',
+  apiKey: process.env.BASKETLINE_API_KEY!,
+})
+
+// After each change in your systems (or all at once, to start): the record's full state.
+await basketline.catalog.upsertSeller({ sellerId: 'acme', name: 'Acme Audio' })
+await basketline.catalog.upsertProduct({ productId: 'SKU-123', sellerId: 'acme', name: 'Earbuds', category: 'Audio', price: 2999 })
+await basketline.campaigns.upsert({ campaignId: 'diwali-2026', sellerId: 'acme', title: 'Diwali sale', status: 'active', productIds: ['SKU-123'] })
+
+await basketline.catalog.removeProduct('SKU-123')
+await basketline.campaigns.remove('diwali-2026')
+
+// A shopper's sign-in succeeded (stronger than the page's login event), and erasure requests.
+await basketline.identity.identified({ userId, visitorId })
+await basketline.identity.deleteUser(userId)
+```
+
+- **Full state, newest wins:** send the whole record each time, with `updatedAt` (when it changed; default now). An update older than one Basketline already has is ignored, so retries and out-of-order sends are safe.
+- **Sellers:** a product without `sellerId` is your own (first-party). A campaign's products must all be its seller's; Basketline keeps a campaign that breaks this and flags it.
+- **Arrays:** every method also takes an array; large ones go 500 per request.
+- **Errors throw** (a `BasketlineError` with the status and the API's reasons), unlike the browser client: retry them from your job queue. A `401` gets a fresh token once and a `429`/`5xx` is retried once.
+- **Auth:** the API key is exchanged for a 15-minute integration token, reused until shortly before it expires. Requires Node 18+ (global `fetch`) or a `fetch` option.
 
 ## Options
 
@@ -164,8 +207,8 @@ The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` m
 pnpm install
 pnpm test             # Vitest + jsdom
 pnpm typecheck
-pnpm build        # dist/: ESM, CommonJS, basketline.global.js (window.Basketline), .d.ts
-npm pack             # divya2424-basketline-sdk-0.1.0.tgz, to try in another project
+pnpm build        # dist/: ESM, CommonJS (index and server), basketline.global.js (window.Basketline), .d.ts
+npm pack             # divya2424-basketline-sdk-0.3.0.tgz, to try in another project
 ```
 
 **Publishing:** bump `version` in `package.json`, push, and create a GitHub release `vX.Y.Z`. The `publish` workflow runs the typecheck, tests and build, then publishes to GitHub Packages. `ci` runs the same checks on every push and pull request.

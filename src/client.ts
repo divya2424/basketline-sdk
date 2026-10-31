@@ -1,4 +1,4 @@
-import { buildEvent, type ApiEvent, type EventFields, type EventName, type FieldsFor } from './events'
+import { buildEvent, type ApiEvent, type EventFields, type EventName, type FieldsFor, type IdentityEvent, type IdentityFields, type InteractionEvent } from './events'
 import { tokenExpiry, visitorIdFor, type KeyValueStorage } from './identity'
 
 export interface BasketlineOptions {
@@ -91,6 +91,23 @@ export function createBasketline(options: BasketlineOptions) {
 
   function visitorId() {
     return visitorIdFor(tenantId, storage, newId)
+  }
+
+  // The shopper signed in on this browser, so identify() on every page load sends login once.
+  const signedInKey = `basketline:signed-in:${tenantId}`
+  function signedIn(): string | null {
+    try {
+      return storage?.getItem(signedInKey) || null
+    } catch {
+      return null
+    }
+  }
+  function rememberSignedIn(userId: string) {
+    try {
+      storage?.setItem(signedInKey, userId)
+    } catch {
+      // Without storage, a reload sends login again.
+    }
   }
 
   async function fetchVisitorToken(): Promise<string> {
@@ -205,23 +222,42 @@ export function createBasketline(options: BasketlineOptions) {
 
   return {
     /**
-     * Sends any event (see EVENT_NAMES), e.g. sendEvent('click', { campaignId, productId }).
+     * Sends what the shopper did (see INTERACTION_EVENTS), e.g. track('click', { campaignId, productId }).
      * impression and click need a campaignId, add_to_cart a productId: an add to
      * cart is credited to the shopper's latest ad click on that product within 7 days.
      * Returns the event's ID, or null if it was invalid (see onError).
      */
+    track: <E extends InteractionEvent>(eventName: E, ...[fields]: {} extends FieldsFor<E> ? [fields?: FieldsFor<E>] : [fields: FieldsFor<E>]) =>
+      enqueue(eventName, fields ?? {}),
+
+    /** Sends sign-in activity (see IDENTITY_EVENTS), e.g. identity('login_click', { pageName: 'header' }). */
+    identity: (eventName: IdentityEvent, fields?: IdentityFields) => enqueue(eventName, fields ?? {}),
+
+    /** @deprecated Use track() for interactions and identity() for sign-in activity. */
     sendEvent: <E extends EventName>(eventName: E, ...[fields]: {} extends FieldsFor<E> ? [fields?: FieldsFor<E>] : [fields: FieldsFor<E>]) =>
       enqueue(eventName, fields ?? {}),
 
-    /** The shopper signed in: later events are theirs. Earlier queued events still go out as the visitor. */
+    /**
+     * The shopper signed in: later events are theirs, starting with a login event
+     * (once per sign-in, so calling this on every page load is fine). Earlier queued
+     * events still go out as the visitor.
+     */
     identify(shopper: Identify) {
       void flushNow()
       sender = { kind: 'registered', userId: shopper.userId, getToken: shopper.getToken }
+      const userId = shopper.userId.toLowerCase()
+      if (signedIn() !== userId) {
+        rememberSignedIn(userId)
+        enqueue('login', {})
+      }
     },
-    /** The shopper signed out: back to this browser's visitor. */
+    /** The shopper signed out: a logout event as them, then back to this browser's visitor. */
     reset() {
-      void flushNow()
-      if (sender.kind === 'registered') tokens.delete(sender)
+      const leaving = sender
+      if (leaving.kind === 'registered') enqueue('logout', {})
+      rememberSignedIn('')
+      // Their token goes once the logout (sent with it) is out.
+      void flushNow().then(() => tokens.delete(leaving))
       sender = { kind: 'visitor' }
     },
     /** This browser's visitor ID for the store: send it to your backend's shopper-token call, so the visitor and the shopper stay one person. */

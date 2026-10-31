@@ -70,24 +70,44 @@ describe('identity', () => {
     expect(other.visitorId).not.toBe(one.visitorId)
   })
 
-  it('sends a signed-in shopper\'s events with their token and ID, and the visitor\'s again after reset', async () => {
+  it('sends a signed-in shopper\'s events with their token and ID, from a login to a logout, and the visitor\'s again after reset', async () => {
     const { bl, api } = client()
     const getToken = vi.fn(async () => tokenWithExp('shopper', Math.floor(Date.now() / 1000) + 1800))
-    bl.sendEvent('home_view') // queued as the visitor
+    bl.track('home_view') // queued as the visitor
     bl.identify({ userId: 'ABCDEF00-0000-4000-8000-000000000001', getToken })
-    bl.sendEvent('add_to_cart', { productId: PRODUCT, quantity: 2 })
-    bl.sendEvent('add_to_cart', { productId: PRODUCT })
+    bl.track('add_to_cart', { productId: PRODUCT, quantity: 2 })
+    bl.track('add_to_cart', { productId: PRODUCT })
     await bl.flush()
     bl.reset()
-    bl.sendEvent('home_view')
+    bl.track('home_view')
     await bl.flush()
-    const [asVisitor, asShopper, afterReset] = api.eventCalls()
+    const [asVisitor, asShopper, loggingOut, afterReset] = api.eventCalls()
     expect(asVisitor!.body.userType).toBe('visitor')
     expect(asShopper!.body).toMatchObject({ userId: 'abcdef00-0000-4000-8000-000000000001', userType: 'registered' })
     expect(asShopper!.headers.get('Authorization')).toMatch(/shopper$/)
-    expect(asShopper!.body.events[0]).toEqual(expect.objectContaining({ eventName: 'add_to_cart', properties: { productId: PRODUCT, campaignId: null, quantity: 2 } }))
+    expect(asShopper!.body.events.map((e: { eventName: string }) => e.eventName)).toEqual(['login', 'add_to_cart', 'add_to_cart'])
+    expect(asShopper!.body.events[1]).toEqual(expect.objectContaining({ eventName: 'add_to_cart', properties: { productId: PRODUCT, campaignId: null, quantity: 2 } }))
+    expect(loggingOut!.body).toMatchObject({ userType: 'registered', events: [expect.objectContaining({ eventName: 'logout' })] })
     expect(getToken).toHaveBeenCalledTimes(1)
     expect(afterReset!.body).toMatchObject({ userId: bl.visitorId, userType: 'visitor' })
+  })
+
+  it('sends login once per sign-in, though identify() runs on every page load', async () => {
+    const storage = memoryStorage()
+    const api = fakeApi()
+    const page = () => createBasketline({ apiUrl: API, tenantId: TENANT, fetch: api.fetch, storage })
+    const shopper = { userId: '00000000-0000-4000-8000-000000000001', getToken: () => 'shopper' }
+    for (const bl of [page(), page()]) {
+      bl.identify(shopper)
+      await bl.flush()
+    }
+    const afterSignOut = page()
+    afterSignOut.identify(shopper)
+    afterSignOut.reset()
+    afterSignOut.identify(shopper)
+    await afterSignOut.flush()
+    const names = api.eventCalls().flatMap((c) => c.body.events.map((e: { eventName: string }) => e.eventName))
+    expect(names).toEqual(['login', 'logout', 'login'])
   })
 
   it('gets a fresh token after a 401, once', async () => {
@@ -148,9 +168,9 @@ describe('delivery', () => {
 describe('validation', () => {
   it('drops invalid events and personal-looking properties, and reports why', async () => {
     const { bl, api, errors } = client()
-    expect(bl.sendEvent('impression', { campaignId: 'not-a-uuid' })).toBeNull()
+    expect(bl.sendEvent('impression', { campaignId: 'not an id' })).toBeNull()
     expect(bl.sendEvent('purchase' as never, {} as never)).toBeNull()
-    expect(bl.sendEvent('click', { campaignId: CAMPAIGN, productId: 'nope' })).toBeNull()
+    expect(bl.sendEvent('click', { campaignId: CAMPAIGN, productId: '-nope' })).toBeNull()
     const id = bl.sendEvent('click', { campaignId: CAMPAIGN, productId: PRODUCT, properties: { position: 1, email: 'a@b.c' } })
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
     await bl.flush()
@@ -169,10 +189,34 @@ describe('validation', () => {
     expect(bl.sendEvent('add_to_cart')).toBeNull()
     expect(bl.sendEvent('add_to_cart', { productId: PRODUCT, quantity: 0 })).toBeNull()
     expect(errors).toEqual([
-      'event dropped: click needs a campaignId (UUID)',
-      'event dropped: add_to_cart needs a productId (UUID)',
+      'event dropped: click needs a campaignId',
+      'event dropped: add_to_cart needs a productId',
       'event dropped: quantity must be a positive integer',
     ])
+  })
+
+  it("takes the retailer's own IDs as they are, and UUIDs lowercased", async () => {
+    const { bl, api, errors } = client()
+    bl.track('click', { campaignId: 'diwali-2026', productId: 'SKU-123/blue' })
+    bl.track('click', { campaignId: CAMPAIGN.toUpperCase() })
+    await bl.flush()
+    expect(api.eventCalls()[0]!.body.events.map((e: { properties: object }) => e.properties)).toEqual([
+      { campaignId: 'diwali-2026', productId: 'SKU-123/blue' },
+      { campaignId: CAMPAIGN, productId: null },
+    ])
+    expect(errors).toEqual([])
+  })
+
+  it('sends interactions with track() and sign-in activity with identity(), each taking only its own events', async () => {
+    const { bl, api } = client()
+    bl.track('product_click', { productId: PRODUCT, pageName: 'home' })
+    bl.identity('login_click', { pageName: 'header' })
+    // @ts-expect-error login_click is identity activity, not an interaction
+    bl.track('login_click')
+    // @ts-expect-error clicks are interactions
+    bl.identity('click')
+    await bl.flush()
+    expect(api.eventCalls()[0]!.body.events.slice(0, 2).map((e: { eventName: string }) => e.eventName)).toEqual(['product_click', 'login_click'])
   })
 
   it('sends campaignId and productId inside properties, where the caller\'s own properties cannot override them', async () => {
