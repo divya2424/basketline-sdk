@@ -43,7 +43,8 @@ Or with a script tag, without a bundler: host `dist/basketline.global.js` from t
 ```js
 const bl = createBasketline({
   apiUrl: 'https://api.example.com/api/v1',     // your Basketline API: the dashboard's setup code shows it
-  tenantId: 'YOUR-TENANT-ID',                   // your store's ID, from Basketline
+  tenantId: 'YOUR-TENANT-ID',                   // your tenant ID, from Basketline
+  storeId: 'web',                               // which of your stores this site is (your own ID)
 })
 
 // track(): what the shopper did with your ads and store.
@@ -140,7 +141,7 @@ The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` m
 
 ## Your catalog and campaigns (server)
 
-Basketline reports per campaign and per seller, so it needs to know your sellers, which seller each product belongs to, and each campaign's seller and products. Only your servers know that, so they send it, with your API key. Never import this entry into a page.
+Your sellers, products, campaigns and the products you add to each campaign go to Basketline's data lake with each store's ID, for later analysis. Only your servers know them, so they send them, with your API key. Never import this entry into a page.
 
 ```ts
 import { createBasketlineServer } from '@divya2424/basketline-sdk/server'
@@ -153,8 +154,12 @@ const basketline = createBasketlineServer({
 
 // After each change in your systems (or all at once, to start): the record's full state.
 await basketline.catalog.upsertSeller({ sellerId: 'acme', name: 'Acme Audio' })
-await basketline.catalog.upsertProduct({ productId: 'SKU-123', sellerId: 'acme', name: 'Earbuds', category: 'Audio', price: 2999 })
-await basketline.campaigns.upsert({ campaignId: 'diwali-2026', sellerId: 'acme', title: 'Diwali sale', status: 'active', productIds: ['SKU-123'] })
+await basketline.catalog.upsertProduct({ productId: 'SKU-123', storeId: 'web', sellerId: 'acme', name: 'Earbuds', category: 'Audio', price: 2999 })
+await basketline.campaigns.upsert({ campaignId: 'diwali-2026', storeId: 'web', sellerId: 'acme', title: 'Diwali sale', status: 'active', productIds: ['SKU-123'] })
+
+// Products added to a campaign, with the details they have there; and taken out again.
+await basketline.campaigns.addProducts({ campaignId: 'diwali-2026', productId: 'SKU-123', storeId: 'web', sellerId: 'acme', productName: 'Earbuds', productPrice: 2999, category: 'Audio' })
+await basketline.campaigns.removeProducts({ campaignId: 'diwali-2026', productId: 'SKU-123' })
 
 await basketline.catalog.removeProduct('SKU-123')
 await basketline.campaigns.remove('diwali-2026')
@@ -165,7 +170,7 @@ await basketline.identity.deleteUser(userId)
 ```
 
 - **Full state, newest wins:** send the whole record each time, with `updatedAt` (when it changed; default now). An update older than one Basketline already has is ignored, so retries and out-of-order sends are safe.
-- **Sellers:** a product without `sellerId` is your own (first-party). A campaign's products must all be its seller's; Basketline keeps a campaign that breaks this and flags it.
+- **Stores and sellers:** `storeId` is which of your stores a record belongs to (your own ID); a product without `sellerId` is your own (first-party).
 - **Arrays:** every method also takes an array; large ones go 500 per request.
 - **Errors throw** (a `BasketlineError` with the status and the API's reasons), unlike the browser client: retry them from your job queue. A `401` gets a fresh token once and a `429`/`5xx` is retried once.
 - **Auth:** the API key is exchanged for a 15-minute integration token, reused until shortly before it expires. Requires Node 18+ (global `fetch`) or a `fetch` option.
@@ -175,7 +180,8 @@ await basketline.identity.deleteUser(userId)
 | Option | Default | |
 |---|---|---|
 | `apiUrl` | — | The Basketline API, as shown in the dashboard's setup code (**Integrate your site**); locally `http://localhost:8080/api/v1` |
-| `tenantId` | — | Your store's tenant ID |
+| `tenantId` | — | Your tenant ID |
+| `storeId` | — | Which of your stores the events come from (your own ID or a UUID); the dashboard splits every metric by it |
 | `clientType` | `'web'` | `'web'` or `'mobile'`; the dashboard splits every metric by it |
 | `batchSize` | `20` | Events per request (at most 100) |
 | `flushAfterMs` | `2000` | How long the first queued event waits for others |

@@ -1,12 +1,14 @@
 /**
  * @divya2424/basketline-sdk/server: for your backend, never a browser (it holds
  * your API key). Sends what only your servers know: your sellers, their products
- * and campaigns, and which shoppers signed in or were erased.
+ * and campaigns, the products you add to a campaign, and which shoppers signed in
+ * or were erased.
  *
  *   const basketline = createBasketlineServer({ apiUrl, tenantId, apiKey: process.env.BASKETLINE_API_KEY })
  *   await basketline.catalog.upsertSeller({ sellerId: 'acme', name: 'Acme' })
- *   await basketline.catalog.upsertProduct({ productId: 'SKU-1', sellerId: 'acme', name: 'Earbuds', price: 2999 })
- *   await basketline.campaigns.upsert({ campaignId: 'diwali', sellerId: 'acme', title: 'Diwali', status: 'active', productIds: ['SKU-1'] })
+ *   await basketline.catalog.upsertProduct({ productId: 'SKU-1', storeId: 'web', sellerId: 'acme', name: 'Earbuds', price: 2999 })
+ *   await basketline.campaigns.upsert({ campaignId: 'diwali', storeId: 'web', sellerId: 'acme', title: 'Diwali', status: 'active', productIds: ['SKU-1'] })
+ *   await basketline.campaigns.addProducts({ campaignId: 'diwali', productId: 'SKU-1', storeId: 'web', productName: 'Earbuds', productPrice: 2999 })
  *
  * Each update is the record's full state, with when it is from (updatedAt,
  * default now): the newest wins, so retries and out-of-order sends are safe.
@@ -18,7 +20,7 @@ import { BasketlineError } from './client'
 export interface BasketlineServerOptions {
   /** The Basketline API, e.g. "https://api.example.com/api/v1". */
   apiUrl: string
-  /** Your store's tenant ID (UUID), from Basketline. */
+  /** Your tenant ID (UUID), from Basketline. */
   tenantId: string
   /** Your API key (bl_sk_…), from the dashboard. */
   apiKey: string
@@ -38,6 +40,8 @@ export interface Seller extends Versioned {
 
 export interface Product extends Versioned {
   productId: string
+  /** The store it's sold in (your own ID or a UUID). */
+  storeId?: string
   /** Who sells it; without one, it is your own (first-party). */
   sellerId?: string
   name: string
@@ -48,6 +52,8 @@ export interface Product extends Versioned {
 
 export interface Campaign extends Versioned {
   campaignId: string
+  /** The store it runs in (your own ID or a UUID). */
+  storeId?: string
   /** Who runs it: its products must be this seller's. */
   sellerId: string
   title: string
@@ -56,6 +62,17 @@ export interface Campaign extends Versioned {
   endTime?: string | null
   archived?: boolean
   productIds: string[]
+}
+
+/** A product added to a campaign, with the details it has there. */
+export interface CampaignProduct extends Versioned {
+  campaignId: string
+  productId: string
+  storeId?: string
+  sellerId?: string
+  productName: string
+  productPrice?: number | null
+  category?: string | null
 }
 
 export interface Identified extends Versioned {
@@ -155,6 +172,11 @@ export function createBasketlineServer(options: BasketlineServerOptions) {
     campaigns: {
       upsert: (campaigns: Campaign | Campaign[]) => send('campaigns', updates('campaign_upserted', campaigns)),
       remove: (campaignIds: string | string[]) => send('campaigns', updates('campaign_removed', [campaignIds].flat().map((campaignId) => ({ campaignId })))),
+      /** Products added to a campaign (campaign_product_added), each with its name, price and so on. */
+      addProducts: (products: CampaignProduct | CampaignProduct[]) => send('campaigns', updates('campaign_product_added', products)),
+      /** Products taken out of a campaign (campaign_product_removed). */
+      removeProducts: (products: Pick<CampaignProduct, 'campaignId' | 'productId' | 'updatedAt'> | Pick<CampaignProduct, 'campaignId' | 'productId' | 'updatedAt'>[]) =>
+        send('campaigns', updates('campaign_product_removed', products)),
     },
     identity: {
       /** A shopper signed in: their visitor activity and later events count as one customer. */
