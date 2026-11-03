@@ -208,6 +208,19 @@ describe('validation', () => {
     expect(bad.errors).toEqual([expect.stringMatching(/^storeId must be/)])
   })
 
+  it("sends each event's own store (its seller), and drops an event with an invalid one", async () => {
+    const { bl, api, errors } = client(fakeApi(), { storeId: 'web' })
+    bl.track('impression', { campaignId: 'diwali', storeId: 'acme' })
+    bl.track('click', { campaignId: 'diwali', productId: 'SKU-1', storeId: 'ACME-2' })
+    bl.track('home_view')
+    bl.track('impression', { campaignId: 'diwali', storeId: 'no spaces' })
+    await bl.flush()
+    const { storeId, events } = api.eventCalls()[0]!.body
+    expect(storeId).toBe('web')
+    expect(events.map((e: { storeId?: string }) => e.storeId)).toEqual(['acme', 'ACME-2', undefined])
+    expect(errors).toEqual([expect.stringMatching(/storeId must be/)])
+  })
+
   it("takes the store's own IDs as they are, and UUIDs lowercased", async () => {
     const { bl, api, errors } = client()
     bl.track('click', { campaignId: 'diwali-2026', productId: 'SKU-123/blue' })

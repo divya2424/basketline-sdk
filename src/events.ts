@@ -36,6 +36,8 @@ export interface EventFields {
   campaignId?: string | null
   /** The product's UUID, or your own product ID such as a SKU. */
   productId?: string | null
+  /** The store (seller) it's about, e.g. the seller of the ad's campaign or of the product; default the client's storeId. */
+  storeId?: string | null
   /** Where it happened, e.g. "home", "product"; at most 100 characters. */
   pageName?: string
   /** What on the page produced it, e.g. "carousel"; at most 100 characters. */
@@ -61,6 +63,7 @@ export interface ApiEvent {
   eventId: string
   eventName: EventName
   timestamp: string
+  storeId?: string
   pageName?: string
   featureName?: string
   properties: {
@@ -88,6 +91,7 @@ export function buildEvent(eventName: string, fields: EventFields, eventId: stri
   if (eventName === 'add_to_cart' && !isStoreRecordId(fields.productId)) return { error: 'add_to_cart needs a productId' }
   if (fields.campaignId != null && !isStoreRecordId(fields.campaignId)) return { error: 'campaignId must be a UUID or your own ID (letters, digits, ._:/-, up to 128)' }
   if (fields.productId != null && !isStoreRecordId(fields.productId)) return { error: 'productId must be a UUID or your own ID (letters, digits, ._:/-, up to 128)' }
+  if (fields.storeId != null && !isStoreRecordId(fields.storeId)) return { error: 'storeId must be a UUID or your own ID (letters, digits, ._:/-, up to 128)' }
   if (fields.quantity !== undefined && !(Number.isInteger(fields.quantity) && fields.quantity > 0)) return { error: 'quantity must be a positive integer' }
   for (const name of ['pageName', 'featureName'] as const) {
     const value = fields[name]
@@ -111,6 +115,7 @@ export function buildEvent(eventName: string, fields: EventFields, eventId: stri
       eventId,
       eventName: eventName as EventName,
       timestamp: now.toISOString(),
+      ...(fields.storeId != null ? { storeId: normalizeId(fields.storeId) } : {}),
       ...(fields.pageName ? { pageName: fields.pageName } : {}),
       ...(fields.featureName ? { featureName: fields.featureName } : {}),
       properties,

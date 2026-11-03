@@ -44,19 +44,18 @@ Or with a script tag, without a bundler: host `dist/basketline.global.js` from t
 const bl = createBasketline({
   apiUrl: 'https://api.example.com/api/v1',     // your Basketline API: the dashboard's setup code shows it
   tenantId: 'YOUR-TENANT-ID',                   // your tenant ID, from Basketline
-  storeId: 'web',                               // which of your stores this site is (your own ID)
 })
 
 // track(): what the shopper did with your ads and store.
 
-// An ad was shown.
-bl.track('impression', { campaignId })
+// An ad's product was shown: one impression per product, with the store (seller) whose campaign it is.
+bl.track('impression', { campaignId, productId, storeId: sellerId })
 
-// The shopper clicked the ad, opening a product.
-bl.track('click', { campaignId, productId })
+// The shopper clicked it, opening the product.
+bl.track('click', { campaignId, productId, storeId: sellerId })
 
 // The shopper added a product to the cart (anywhere on your site, any time in the next 7 days).
-bl.track('add_to_cart', { productId, quantity: 1 })
+bl.track('add_to_cart', { productId, storeId: product.sellerId, quantity: 1 })
 
 // Anything else you want to analyse later.
 bl.track('cart_view', { pageName: 'cart' })
@@ -81,9 +80,9 @@ That's all a visitor needs. The SDK:
 
 `bl.identity(eventName, fields?)` takes sign-in activity (`IDENTITY_EVENTS`): `login_click`, `signup_click`, `login` and `logout`. You rarely send the last two yourself: `identify()` and `reset()` do (see below).
 
-Every event also takes `pageName`, `featureName` and `properties`. In TypeScript, a missing required field, or an event sent through the wrong method, is a compile error.
+Every event also takes `storeId` (the seller it's about: the seller of the ad's campaign, or of the product added to the cart; default the client's `storeId`), `pageName`, `featureName` and `properties`. In TypeScript, a missing required field, or an event sent through the wrong method, is a compile error.
 
-**IDs** are your own (a SKU like `SKU-123/blue`, a campaign code like `diwali-2026`: letters, digits and `._:/-`, up to 128 characters) or UUIDs. Use the same IDs as in your catalog (see the server side), so Basketline knows each product's seller. `track` and `identity` return the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
+**IDs** are your own (a SKU like `SKU-123/blue`, a campaign code like `diwali-2026`: letters, digits and `._:/-`, up to 128 characters) or UUIDs. Use the same IDs as in your catalog (see the server side). `track` and `identity` return the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
 
 `bl.sendEvent(eventName, fields)` from 0.2 still works for every event; it is deprecated in favour of `track` and `identity`.
 
@@ -141,7 +140,7 @@ The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` m
 
 ## Your catalog and campaigns (server)
 
-Your sellers, products, campaigns and the products you add to each campaign go to Basketline's data lake with each store's ID, for later analysis. Only your servers know them, so they send them, with your API key. Never import this entry into a page.
+Your sellers (each one a store: Basketline reports per store), their products and campaigns, and the products added to each campaign go to Basketline with your API key, and to its data lake for later analysis. Only your servers know them, so they send them. Never import this entry into a page.
 
 ```ts
 import { createBasketlineServer } from '@divya2424/basketline-sdk/server'
@@ -154,11 +153,11 @@ const basketline = createBasketlineServer({
 
 // After each change in your systems (or all at once, to start): the record's full state.
 await basketline.catalog.upsertSeller({ sellerId: 'acme', name: 'Acme Audio' })
-await basketline.catalog.upsertProduct({ productId: 'SKU-123', storeId: 'web', sellerId: 'acme', name: 'Earbuds', category: 'Audio', price: 2999 })
-await basketline.campaigns.upsert({ campaignId: 'diwali-2026', storeId: 'web', sellerId: 'acme', title: 'Diwali sale', status: 'active', productIds: ['SKU-123'] })
+await basketline.catalog.upsertProduct({ productId: 'SKU-123', sellerId: 'acme', name: 'Earbuds', category: 'Audio', price: 2999 })
+await basketline.campaigns.upsert({ campaignId: 'diwali-2026', sellerId: 'acme', placement: 'spotlight', title: 'Diwali sale', status: 'active', productIds: ['SKU-123'] })
 
-// Products added to a campaign, with the details they have there; and taken out again.
-await basketline.campaigns.addProducts({ campaignId: 'diwali-2026', productId: 'SKU-123', storeId: 'web', sellerId: 'acme', productName: 'Earbuds', productPrice: 2999, category: 'Audio' })
+// Products added to a campaign, with the details they have there (they name the product in its results); and taken out again.
+await basketline.campaigns.addProducts({ campaignId: 'diwali-2026', productId: 'SKU-123', sellerId: 'acme', productName: 'Earbuds', productPrice: 2999, category: 'Audio' })
 await basketline.campaigns.removeProducts({ campaignId: 'diwali-2026', productId: 'SKU-123' })
 
 await basketline.catalog.removeProduct('SKU-123')
@@ -167,10 +166,15 @@ await basketline.campaigns.remove('diwali-2026')
 // A shopper's sign-in succeeded (stronger than the page's login event), and erasure requests.
 await basketline.identity.identified({ userId, visitorId })
 await basketline.identity.deleteUser(userId)
+
+// A campaign's results per product, e.g. for the seller's portal: impressions, clicks, CTR, add-to-carts.
+const results = await basketline.insights.campaignProducts({ campaignId, storeId: sellerId, from: '2026-10-01', to: '2026-11-01' })
 ```
 
 - **Full state, newest wins:** send the whole record each time, with `updatedAt` (when it changed; default now). An update older than one Basketline already has is ignored, so retries and out-of-order sends are safe.
-- **Stores and sellers:** `storeId` is which of your stores a record belongs to (your own ID); a product without `sellerId` is your own (first-party).
+- **Stores are sellers:** a record's `storeId` defaults to its `sellerId`, so you rarely send it; a product without `sellerId` is your own (first-party).
+- **Placements:** a campaign's `placement` is where your site shows it (e.g. `spotlight`, `deals`); it goes to the data lake with the campaign.
+- **Results:** `insights.campaignProducts` takes Basketline's IDs (a UUID you sent is used as is); `from`/`to` are UTC days, default the last 30.
 - **Arrays:** every method also takes an array; large ones go 500 per request.
 - **Errors throw** (a `BasketlineError` with the status and the API's reasons), unlike the browser client: retry them from your job queue. A `401` gets a fresh token once and a `429`/`5xx` is retried once.
 - **Auth:** the API key is exchanged for a 15-minute integration token, reused until shortly before it expires. Requires Node 18+ (global `fetch`) or a `fetch` option.
@@ -181,7 +185,7 @@ await basketline.identity.deleteUser(userId)
 |---|---|---|
 | `apiUrl` | — | The Basketline API, as shown in the dashboard's setup code (**Integrate your site**); locally `http://localhost:8080/api/v1` |
 | `tenantId` | — | Your tenant ID |
-| `storeId` | — | Which of your stores the events come from (your own ID or a UUID); the dashboard splits every metric by it |
+| `storeId` | — | The store (seller) for events sent without their own `storeId` (your own ID or a UUID); the dashboard splits every metric by store |
 | `clientType` | `'web'` | `'web'` or `'mobile'`; the dashboard splits every metric by it |
 | `batchSize` | `20` | Events per request (at most 100) |
 | `flushAfterMs` | `2000` | How long the first queued event waits for others |

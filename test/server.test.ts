@@ -52,7 +52,7 @@ describe('the server entry', () => {
       { productId: 'SKU-1', sellerId: 'acme', name: 'Earbuds', price: 2999, updatedAt: new Date('2026-10-30T09:00:00Z') },
       { productId: 'SKU-2', name: 'Cable' },
     ])
-    await basketline.campaigns.upsert({ campaignId: 'diwali', sellerId: 'acme', title: 'Diwali', status: 'active', productIds: ['SKU-1'] })
+    await basketline.campaigns.upsert({ campaignId: 'diwali', sellerId: 'acme', placement: 'spotlight', title: 'Diwali', status: 'active', productIds: ['SKU-1'] })
     await basketline.identity.identified({ userId: '00000000-0000-4000-8000-000000000001', visitorId: '00000000-0000-4000-8000-000000000002' })
     await basketline.identity.deleteUser('00000000-0000-4000-8000-000000000001')
     expect(api.retailCalls().map((c) => [c.path, c.body])).toEqual([
@@ -61,7 +61,7 @@ describe('the server entry', () => {
         { eventName: 'product_upserted', updatedAt: '2026-10-31T10:00:00.000Z', data: { productId: 'SKU-2', name: 'Cable' } },
       ] }],
       ['/api/v1/retail/campaigns', { events: [
-        { eventName: 'campaign_upserted', updatedAt: '2026-10-31T10:00:00.000Z', data: { campaignId: 'diwali', sellerId: 'acme', title: 'Diwali', status: 'active', productIds: ['SKU-1'] } },
+        { eventName: 'campaign_upserted', updatedAt: '2026-10-31T10:00:00.000Z', data: { campaignId: 'diwali', sellerId: 'acme', placement: 'spotlight', title: 'Diwali', status: 'active', productIds: ['SKU-1'] } },
       ] }],
       ['/api/v1/retail/identity', { events: [
         { eventName: 'user_identified', updatedAt: '2026-10-31T10:00:00.000Z', data: { userId: '00000000-0000-4000-8000-000000000001', visitorId: '00000000-0000-4000-8000-000000000002' } },
@@ -85,6 +85,25 @@ describe('the server entry', () => {
         { eventName: 'campaign_product_removed', updatedAt: '2026-10-31T10:00:00.000Z', data: { campaignId: 'diwali', productId: 'SKU-1' } },
       ] }],
     ])
+  })
+
+  it("reads a campaign's results per product, for one store and period", async () => {
+    const items = [{ productId: 'p1', name: 'Earbuds', category: 'Audio', price: 2999, impressions: 10, clicks: 2, ctr: 0.2, addToCarts: 1, clickToBasket: 0.5 }]
+    const calls: { url: URL; headers: Headers; method?: string }[] = []
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/auth/integration-token')) return Response.json({ integrationToken: 'integration-1', expiresIn: 900 }, { status: 201 })
+      calls.push({ url, headers: new Headers(init?.headers), method: init?.method })
+      return Response.json({ campaignId: 'c1', items })
+    }) as unknown as typeof globalThis.fetch
+    const basketline = createBasketlineServer({ apiUrl: API, tenantId: TENANT, apiKey: 'bl_sk_test', fetch })
+    const results = await basketline.insights.campaignProducts({ campaignId: 'c1', storeId: 's1', from: '2026-10-01T00:00:00Z', to: new Date('2026-11-01T00:00:00Z') })
+    expect(results).toEqual(items)
+    const [call] = calls
+    expect(call!.method).toBe('GET')
+    expect(call!.url.pathname).toBe('/api/v1/ad/c1/products')
+    expect(Object.fromEntries(call!.url.searchParams)).toEqual({ from: '2026-10-01T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z', storeId: 's1' })
+    expect(call!.headers.get('Authorization')).toBe('Bearer integration-1')
   })
 
   it('splits large sends into requests of 500', async () => {
