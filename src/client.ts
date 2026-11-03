@@ -1,11 +1,13 @@
-import { buildEvent, type ApiEvent, type EventFields, type EventName, type FieldsFor, type IdentityEvent, type IdentityFields, type InteractionEvent } from './events'
+import { buildEvent, isStoreRecordId, type ApiEvent, type EventFields, type EventName, type FieldsFor, type IdentityEvent, type IdentityFields, type InteractionEvent } from './events'
 import { tokenExpiry, visitorIdFor, type KeyValueStorage } from './identity'
 
 export interface BasketlineOptions {
   /** The Basketline API, e.g. "https://api.example.com/api/v1" (the dashboard's setup code shows yours). */
   apiUrl: string
-  /** Your store's tenant ID (UUID), from Basketline. */
+  /** Your tenant ID (UUID), from Basketline. */
   tenantId: string
+  /** Which of your stores the events come from: your own ID or a UUID (optional). */
+  storeId?: string
   /** The app the events come from (default "web"). */
   clientType?: 'web' | 'mobile'
   /** Events per request (default 20, at most 100). */
@@ -61,6 +63,7 @@ export function createBasketline(options: BasketlineOptions) {
   const {
     apiUrl,
     tenantId,
+    storeId,
     clientType = 'web',
     batchSize = 20,
     flushAfterMs = 2000,
@@ -88,6 +91,8 @@ export function createBasketline(options: BasketlineOptions) {
     }
   }
   const log = (...args: unknown[]) => debug && console.debug('[basketline]', ...args)
+  if (storeId !== undefined && !isStoreRecordId(storeId)) report(new BasketlineError('storeId must be a UUID or your own ID (letters, digits, ._:/-, up to 128); events are sent without it'))
+  const store = storeId !== undefined && isStoreRecordId(storeId) ? { storeId } : {}
 
   function visitorId() {
     return visitorIdFor(tenantId, storage, newId)
@@ -147,7 +152,7 @@ export function createBasketline(options: BasketlineOptions) {
       // keepalive: the last batch still arrives while the page unloads.
       keepalive: true,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, tenant_id: tenantId },
-      body: JSON.stringify({ tenantId, ...identity(batch.sender), events: batch.events }),
+      body: JSON.stringify({ tenantId, ...store, ...identity(batch.sender), events: batch.events }),
     })
   }
 

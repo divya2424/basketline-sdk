@@ -72,6 +72,21 @@ describe('the server entry', () => {
     ])
   })
 
+  it('sends the products added to and taken out of a campaign, with their store', async () => {
+    vi.useFakeTimers({ now: new Date('2026-10-31T10:00:00Z') })
+    const { api, basketline } = server()
+    await basketline.campaigns.addProducts({ campaignId: 'diwali', productId: 'SKU-1', storeId: 'web', sellerId: 'acme', productName: 'Earbuds', productPrice: 2999, category: 'Audio' })
+    await basketline.campaigns.removeProducts([{ campaignId: 'diwali', productId: 'SKU-1' }])
+    expect(api.retailCalls().map((c) => [c.path, c.body])).toEqual([
+      ['/api/v1/retail/campaigns', { events: [
+        { eventName: 'campaign_product_added', updatedAt: '2026-10-31T10:00:00.000Z', data: { campaignId: 'diwali', productId: 'SKU-1', storeId: 'web', sellerId: 'acme', productName: 'Earbuds', productPrice: 2999, category: 'Audio' } },
+      ] }],
+      ['/api/v1/retail/campaigns', { events: [
+        { eventName: 'campaign_product_removed', updatedAt: '2026-10-31T10:00:00.000Z', data: { campaignId: 'diwali', productId: 'SKU-1' } },
+      ] }],
+    ])
+  })
+
   it('splits large sends into requests of 500', async () => {
     const { api, basketline } = server()
     await basketline.catalog.removeProduct(Array.from({ length: 1201 }, (_, i) => `SKU-${i}`))

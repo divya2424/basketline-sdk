@@ -195,7 +195,20 @@ describe('validation', () => {
     ])
   })
 
-  it("takes the retailer's own IDs as they are, and UUIDs lowercased", async () => {
+  it('sends the store each batch comes from, and leaves out an invalid one', async () => {
+    const { bl, api } = client(fakeApi(), { storeId: 'web' })
+    bl.sendEvent('home_view')
+    await bl.flush()
+    expect(api.eventCalls()[0]!.body).toMatchObject({ tenantId: TENANT, storeId: 'web', userType: 'visitor' })
+
+    const bad = client(fakeApi(), { storeId: 'no spaces' })
+    bad.bl.sendEvent('home_view')
+    await bad.bl.flush()
+    expect(bad.api.eventCalls()[0]!.body).not.toHaveProperty('storeId')
+    expect(bad.errors).toEqual([expect.stringMatching(/^storeId must be/)])
+  })
+
+  it("takes the store's own IDs as they are, and UUIDs lowercased", async () => {
     const { bl, api, errors } = client()
     bl.track('click', { campaignId: 'diwali-2026', productId: 'SKU-123/blue' })
     bl.track('click', { campaignId: CAMPAIGN.toUpperCase() })

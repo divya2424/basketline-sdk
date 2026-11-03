@@ -1,7 +1,7 @@
 /**
  * @divya2424/basketline-sdk: send ad and shopper events to Basketline from any website.
  *
- *   const bl = createBasketline({ apiUrl, tenantId })
+ *   const bl = createBasketline({ apiUrl, tenantId, storeId })
  *   bl.track('impression', { campaignId })
  *   bl.track('click', { campaignId, productId })
  *   bl.track('add_to_cart', { productId, quantity: 1 })
@@ -9,7 +9,7 @@
  *   bl.identify({ userId, getToken })   // after sign-in, with a shopper token from your backend (sends login)
  *   bl.reset()                          // after sign-out (sends logout)
  *
- * A retailer's backend sends its catalog and campaigns with
+ * A store's backend sends its catalog and campaigns with
  * @divya2424/basketline-sdk/server (never in a browser: it holds the API key).
  * See README.md.
  */
