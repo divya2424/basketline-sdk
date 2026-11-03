@@ -9,9 +9,8 @@
  *   bl.identify({ userId, getToken })   // after sign-in, with a shopper token from your backend (sends login)
  *   bl.reset()                          // after sign-out (sends logout)
  *
- * A store's backend sends its catalog and campaigns with
- * @divya2424/basketline-sdk/server (never in a browser: it holds the API key).
- * See README.md.
+ * The SDK only captures shoppers' events. A store's backend sends its catalog and
+ * campaigns, and reads results, with Basketline's API and its API key. See README.md.
  */
 export { BasketlineError, createBasketline, type Basketline, type BasketlineOptions, type Identify } from './client'
 export {
