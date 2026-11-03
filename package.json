@@ -1,6 +1,6 @@
 {
   "name": "@divya2424/basketline-sdk",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Send ad and shopper events to Basketline from any website: impressions, clicks and add-to-cart, with click-to-basket attributed server-side.",
   "license": "UNLICENSED",
   "repository": {
@@ -19,11 +19,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    },
-    "./server": {
-      "types": "./dist/server.d.ts",
-      "import": "./dist/server.js",
-      "require": "./dist/server.cjs"
     }
   },
   "files": [

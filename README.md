@@ -7,7 +7,7 @@ Send ad and shopper events from your website to [Basketline](https://github.com/
 - **Batched:** 20 events per request or every 2 s, and sent when the page is hidden, so nothing is lost on navigation.
 - **Attribution included:** you send what happened (`click`, `add_to_cart`), and Basketline credits each add to cart to the shopper's latest ad click on that product within 7 days.
 - **Your IDs:** send your own product and campaign IDs (SKUs, codes) or UUIDs.
-- **A server side too:** `@divya2424/basketline-sdk/server` sends your sellers, products and campaigns from your backend (see [Your catalog and campaigns](#your-catalog-and-campaigns-server)).
+- **Events only:** the SDK captures what shoppers do on your site. Your backend talks to Basketline's API itself (see [Your catalog and campaigns](#your-catalog-and-campaigns)).
 
 ## Install
 
@@ -82,7 +82,7 @@ That's all a visitor needs. The SDK:
 
 Every event also takes `storeId` (the seller it's about: the seller of the ad's campaign, or of the product added to the cart; default the client's `storeId`), `pageName`, `featureName` and `properties`. In TypeScript, a missing required field, or an event sent through the wrong method, is a compile error.
 
-**IDs** are your own (a SKU like `SKU-123/blue`, a campaign code like `diwali-2026`: letters, digits and `._:/-`, up to 128 characters) or UUIDs. Use the same IDs as in your catalog (see the server side). `track` and `identity` return the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
+**IDs** are your own (a SKU like `SKU-123/blue`, a campaign code like `diwali-2026`: letters, digits and `._:/-`, up to 128 characters) or UUIDs. Use the same IDs as in your catalog (see [Your catalog and campaigns](#your-catalog-and-campaigns)). `track` and `identity` return the event's ID, or `null` if the event was invalid; the reason goes to `onError`. `properties` holds anything else useful. Keys that look like personal data (email, phone, address, names, card numbers, …) are dropped before sending.
 
 `bl.sendEvent(eventName, fields)` from 0.2 still works for every event; it is deprecated in favour of `track` and `identity`.
 
@@ -138,46 +138,14 @@ docker compose exec auth-service node services/auth-service/src/cli.ts create-ap
 
 The key is shown once. `list-api-keys` and `revoke-api-key --prefix bl_sk_…` manage them. A shopper token can only send events; no other Basketline API accepts it.
 
-## Your catalog and campaigns (server)
+## Your catalog and campaigns
 
-Your sellers (each one a store: Basketline reports per store), their products and campaigns, and the products added to each campaign go to Basketline with your API key, and to its data lake for later analysis. Only your servers know them, so they send them. Never import this entry into a page.
+The SDK doesn't send them: your **backend** calls Basketline's API with your API key, which it exchanges for a 15-minute integration token (`POST /auth/integration-token`, `Authorization: ApiKey bl_sk_…`). Never put the key in a page.
 
-```ts
-import { createBasketlineServer } from '@divya2424/basketline-sdk/server'
+- `POST /retail/catalog` and `POST /retail/campaigns`: your sellers (each one a store: Basketline reports per store), products, campaigns (with the `placement` your site shows them in) and the products added to each campaign, as full-state updates (`updatedAt`: the newest wins). A record's store defaults to its seller.
+- `GET /ad/{campaignId}/products?storeId&from&to`: a campaign's results per product, e.g. for your sellers' portal.
 
-const basketline = createBasketlineServer({
-  apiUrl: 'https://api.example.com/api/v1',
-  tenantId: 'YOUR-TENANT-ID',
-  apiKey: process.env.BASKETLINE_API_KEY!,
-})
-
-// After each change in your systems (or all at once, to start): the record's full state.
-await basketline.catalog.upsertSeller({ sellerId: 'acme', name: 'Acme Audio' })
-await basketline.catalog.upsertProduct({ productId: 'SKU-123', sellerId: 'acme', name: 'Earbuds', category: 'Audio', price: 2999 })
-await basketline.campaigns.upsert({ campaignId: 'diwali-2026', sellerId: 'acme', placement: 'spotlight', title: 'Diwali sale', status: 'active', productIds: ['SKU-123'] })
-
-// Products added to a campaign, with the details they have there (they name the product in its results); and taken out again.
-await basketline.campaigns.addProducts({ campaignId: 'diwali-2026', productId: 'SKU-123', sellerId: 'acme', productName: 'Earbuds', productPrice: 2999, category: 'Audio' })
-await basketline.campaigns.removeProducts({ campaignId: 'diwali-2026', productId: 'SKU-123' })
-
-await basketline.catalog.removeProduct('SKU-123')
-await basketline.campaigns.remove('diwali-2026')
-
-// A shopper's sign-in succeeded (stronger than the page's login event), and erasure requests.
-await basketline.identity.identified({ userId, visitorId })
-await basketline.identity.deleteUser(userId)
-
-// A campaign's results per product, e.g. for the seller's portal: impressions, clicks, CTR, add-to-carts.
-const results = await basketline.insights.campaignProducts({ campaignId, storeId: sellerId, from: '2026-10-01', to: '2026-11-01' })
-```
-
-- **Full state, newest wins:** send the whole record each time, with `updatedAt` (when it changed; default now). An update older than one Basketline already has is ignored, so retries and out-of-order sends are safe.
-- **Stores are sellers:** a record's `storeId` defaults to its `sellerId`, so you rarely send it; a product without `sellerId` is your own (first-party).
-- **Placements:** a campaign's `placement` is where your site shows it (e.g. `spotlight`, `deals`); it goes to the data lake with the campaign.
-- **Results:** `insights.campaignProducts` takes Basketline's IDs (a UUID you sent is used as is); `from`/`to` are UTC days, default the last 30.
-- **Arrays:** every method also takes an array; large ones go 500 per request.
-- **Errors throw** (a `BasketlineError` with the status and the API's reasons), unlike the browser client: retry them from your job queue. A `401` gets a fresh token once and a `429`/`5xx` is retried once.
-- **Auth:** the API key is exchanged for a 15-minute integration token, reused until shortly before it expires. Requires Node 18+ (global `fetch`) or a `fetch` option.
+The request and response shapes are in Basketline's API reference (its README, "API").
 
 ## Options
 
@@ -217,7 +185,7 @@ const results = await basketline.insights.campaignProducts({ campaignId, storeId
 pnpm install
 pnpm test             # Vitest + jsdom
 pnpm typecheck
-pnpm build        # dist/: ESM, CommonJS (index and server), basketline.global.js (window.Basketline), .d.ts
+pnpm build        # dist/: ESM, CommonJS, basketline.global.js (window.Basketline), .d.ts
 npm pack             # divya2424-basketline-sdk-0.3.0.tgz, to try in another project
 ```
 

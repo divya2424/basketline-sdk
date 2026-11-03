@@ -22,7 +22,7 @@ export const INTERACTION_EVENTS = [...METRIC_EVENTS, ...ACTIVITY_EVENTS] as cons
 /**
  * Sign-in activity: identity(). login and logout are also sent by identify() and
  * reset(). That a sign-in succeeded is for the store's server to say
- * (user_identified, see server.ts), since a page can claim anything.
+ * (user_identified, with Basketline's retail API), since a page can claim anything.
  */
 export const IDENTITY_EVENTS = ['login_click', 'signup_click', 'login', 'logout'] as const
 export const EVENT_NAMES = [...INTERACTION_EVENTS, ...IDENTITY_EVENTS] as const
